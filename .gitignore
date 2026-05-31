@@ -3,9 +3,6 @@
 *
 
 # Но разрешаем отслеживание следующих файлов и папок:
-!.gitignore
-!README.md
-!README-*.md
 !LICENSE*
 !*.yaml
 !*.yml
