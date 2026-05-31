@@ -1,4 +1,4 @@
-![ESPHome Logo](/esphome1.png) ![Home Assistant Logo](https://avatars.githubusercontent.com/u/13844975?s=200&v=4)
+![ESPHome Logo](images/esphome-icon.png) ![Home Assistant Logo](images/ha-icon.png)
 <p align="center">
     <img alt="Static Badge" src="https://img.shields.io/badge/made%20by-ParusSmartHome-blue">
     <img alt="Static Badge" src="https://img.shields.io/badge/version-v2.0%20Beta-green">
@@ -86,7 +86,7 @@
 - [yaml файл прошивки](soil_moisture.yaml)
 - [внешний вид](images/soil_moisture_1.jpeg)
 - [внешний вид](images/soil_moisture_2.jpeg)
-- [Схема соединений](images/soil_moisture_shema.jpeg)
+- [Схема соединений](images/soil-moisture-shema-v1.jpeg)
 - [Видео#1 YOUTUBE]()
 - [Файлы для печати]()
 
