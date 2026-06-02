@@ -93,6 +93,7 @@
 - [внешний вид](images/soil_moisture_2.jpeg)
 - [Схема соединений](images/soil-moisture-shema-v1.jpeg)
 - [Видео#1 YOUTUBE](https://youtu.be/_u6fvSj4mms)
+- [Видео#1 RUTUBE](https://rutube.ru/video/1ed6ab72a6196f2f61acb678e1df4e1b/)
 - [Файлы для печати]()
 
 ## 📄 Лицензия
