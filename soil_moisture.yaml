@@ -1,0 +1,895 @@
+# Board: ESP32-C3 Super Mini (Generic)
+# Definition: definitions/boards/esp32-c3-supermini/manifest.yaml
+
+substitutions:
+  name: soil-moisture1
+  friendly_name: Soil Moisture 1
+  friendly_name_short: soil_moisture1
+  version: "30.05.2026"
+  device_ip: 192.168.0.170
+  reboot_timeout: 0s
+  button_pin: GPIO0
+  batt_voltage_pin: GPIO1
+  moisture_sensor_pin: GPIO4
+  rtttl_pin: GPIO5
+  sda1: GPIO9
+  scl1: GPIO10
+  run_duration: 150s
+  sleep_duration: 30s
+
+<<: !include attach/common/esphome.yaml 
+<<: !include attach/common/esp/esp32_c3_idf.yaml
+<<: !include attach/common/logger/debug.yaml
+<<: !include attach/common/api.yaml
+<<: !include attach/common/ota.yaml
+<<: !include attach/common/wifi.yaml
+<<: !include attach/common/web/web_server3.yaml
+<<: !include attach/common/bus/i2c_a.yaml
+<<: !include attach/common/sun.yaml
+packages:
+  common: !include attach/packages/standart.yaml
+esphome:
+  name: ${name}
+  on_boot:
+    - priority: -100
+      then:
+        - lambda: |-
+            // Увеличиваем счётчик запусков
+            id(bootCount)++;
+            // Получаем причину пробуждения
+            int wakeup_reason = (int)esp_sleep_get_wakeup_cause();
+            // Сохраняем причину в глобальную переменную для использования в interval
+            id(last_wakeup_reason) = wakeup_reason;
+            // Формируем новую запись в формате "N,R"
+            std::string entry = std::to_string(id(bootCount)) + "," + std::to_string(wakeup_reason);
+            // Проверяем длину истории и ограничиваем до 10 записей
+            const size_t max_entries = 10;
+            size_t current_entries = std::count(id(bootHistory).begin(), id(bootHistory).end(), ' ') + 1;
+            if (current_entries >= max_entries) {
+              // Удаляем первую запись (самую старую)
+              size_t pos = id(bootHistory).find(' ');
+              if (pos != std::string::npos) {
+                id(bootHistory) = id(bootHistory).substr(pos + 1);
+              } else {
+                id(bootHistory) = ""; // если нет пробелов, очищаем
+              }
+            }
+            // Добавляем пробел, если история не пустая
+            if (!id(bootHistory).empty()) {
+              id(bootHistory) += " ";
+            }
+            // Добавляем новую запись в историю
+            id(bootHistory) += entry;
+            // Логи для отладки
+            ESP_LOGI("boot", "Boot count: %d, Wakeup reason: %d", id(bootCount), wakeup_reason);
+            ESP_LOGI("boot", "Boot history: %s", id(bootHistory).c_str());
+        - text_sensor.template.publish:
+            id: wakeup_cause_text
+            state: !lambda |-
+              switch (id(last_wakeup_reason)) {
+                case 0: return {"0-Norm"};
+                case 2: return {"2-EXT0"};
+                case 3: return {"3-EXT1"};
+                case 4: return {"4-Timer"};
+                case 5: return {"5-Touchpad"};
+                case 6: return {"6-ULP"};
+                case 7: return {"7-GPIO"};
+                case 8: return {"8-UART"};
+                case 9: return {"9-WIFI"};
+                case 10: return {"10-COCPU"};
+                case 11: return {"11-COCPU_TRAP"};
+                case 12: return {"12-BT"};
+                default: return {"Unknown"};
+              }
+        - component.update: battery_voltage
+globals:
+  - id: time_received # Флаг получения времени от НА
+    type: bool
+    initial_value: "false"
+  - id: next_sleep_duration # Переменная продолжительности сна перед засыпанием в любой момент времени
+    type: uint64_t
+    initial_value: '0'
+  - id: bootCount # Переменная подсчета количества загрузок\выхода из сна
+    type: int
+    restore_value: yes
+    initial_value: '0'
+  - id: bootHistory # Переменная причин загрузок\выхода из сна
+    type: std::string
+    restore_value: yes
+    initial_value: '""'
+  - id: last_wakeup_reason # Переменная причины последней загрузки\выхода из сна
+    type: int
+    initial_value: '0' # Изначально 0 (неопределённая причина)
+  - id: countdown # Обратный отсчет до сна
+    type: int
+    initial_value: '0'
+  - id: first_event # Переменная первого события времени 1- time1 , 2-time2
+    type: int
+    initial_value: '0' # Изначально 0 (неопределённая причина)
+  - id: long_press_active
+    type: bool
+    initial_value: 'false'
+  - id: is_touching
+    type: bool
+    initial_value: 'false'
+  - id: touch_start_time
+    type: uint32_t
+    initial_value: '0'
+  - id: time1_hour_var
+    type: int
+    restore_value: yes
+    initial_value: '8'
+  - id: time2_hour_var
+    type: int
+    restore_value: yes
+    initial_value: '20'
+font:
+  - file: "fonts/arial.ttf"
+    id: arial_12
+    size: 12
+    glyphs: |-
+      |#~*<>!'"%/()+=,-_.:°0123456789АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЬЫЪЭЮЯABCDEFGHIJKLMNOPQRSTUVWXYZ абвгдеёжзийклмнопрстуфхцчшщьыъэюяabcdefghijklmnopqrstuvwxyz
+  - file: "fonts/arial.ttf"
+    id: arial_20
+    size: 20
+    glyphs: |-
+      |#~*<>!'"%/()+=,-_.:°0123456789
+  - file: "fonts/arial.ttf"
+    id: arial_18
+    size: 18
+    glyphs: |-
+      |#~*<>!'"%/()+=,-_.:°0123456789ПАРУСVНДО
+  - file: "fonts/arial.ttf"
+    id: arial_30
+    size: 30
+    glyphs: |-
+      |#~*<>!'"%/()+=,-_.:°0123456789NAna
+
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    #address: 0x3C
+    i2c_id: bus_a
+    id: my_display
+    rotation: 90°
+    pages:
+      - id: main_page
+        lambda: |-
+          it.print(0, 0, id(arial_18), "1");
+          it.printf(0, 17, id(arial_12), TextAlign::TOP_LEFT, "%.0f--", id(alert_moisture).state);
+          it.print(66, 5, id(arial_18), TextAlign::TOP_RIGHT, "%");
+          it.printf(34, 0, id(arial_30), TextAlign::TOP_CENTER, "%.0f", id(soil_moisture).state);
+          
+          // Текущее время
+          auto time = id(sntp_time).now(); // ESPTime
+          it.printf(25, 29, id(arial_12), TextAlign::TOP_LEFT, "%02d:%02d", id(sntp_time).now().hour, id(sntp_time).now().minute);
+
+          // режим период/время
+          if (!id(period_time).state) {
+          it.print(16, 40, id(arial_12), TextAlign::TOP_LEFT, "-период");
+          it.printf(0, 40, id(arial_12), TextAlign::TOP_LEFT, "%.0f", id(period).state);
+          }
+          else {
+          it.print(16, 40, id(arial_12), TextAlign::TOP_LEFT, "-время");
+
+            if (id(first_event) == 1) {
+                it.printf(0, 40, id(arial_12), TextAlign::TOP_LEFT, "%02d", id(time1).hour);
+              } else {
+                it.printf(0, 40, id(arial_12), TextAlign::TOP_LEFT, "%02d", id(time2).hour);
+              }
+          }
+
+          // сигнал да/нет
+          it.print(22, 51, id(arial_12), TextAlign::TOP_LEFT, "-сигнал");
+          if (!id(alert_switch).state) {
+          it.printf(0, 52, id(arial_12), TextAlign::TOP_LEFT, "нет");
+          }
+          else {
+          it.print(0, 51, id(arial_12), TextAlign::TOP_LEFT, "ДА");
+          }
+          
+          it.print(0, 62, id(arial_12), TextAlign::TOP_LEFT, "DC");
+          it.printf(25, 62, id(arial_12), TextAlign::TOP_LEFT, "-%.2fV", id(battery_voltage).state);
+
+          //it.print(0, 73, id(arial_12), TextAlign::TOP_LEFT, "сон");
+          it.print(20, 73, id(arial_12), TextAlign::TOP_LEFT, "Сон на");
+          it.printf(18, 84, id(arial_12), TextAlign::TOP_LEFT, id(next_sleep_duration_sensor).state.c_str());
+          //if (!id(sleep_work).state) {
+          //  it.printf(16, 94, id(arial_12), "(%2d)", id(countdown));
+          //}else {
+          //  it.print(16, 94, id(arial_12), "(OFF)");
+          //}
+
+          if (!id(sleep_work).state) {
+            it.printf(0, 78, id(arial_12), "%2d", id(countdown));
+          }else {
+            it.print(0, 78, id(arial_12), "off");
+          }
+
+          it.print(0, 95, id(arial_12), TextAlign::TOP_LEFT, "X 2-сон/нет");
+          it.print(0, 106, id(arial_12), TextAlign::TOP_LEFT, "X 3-режим");
+          it.print(0, 117, id(arial_12), TextAlign::TOP_LEFT, "X 4-сигнал");
+          
+      - id: setting
+        lambda: |-
+          it.print(0, 0, id(arial_12), TextAlign::TOP_LEFT, "X 1-выйти");
+          it.print(0, 20, id(arial_12), TextAlign::TOP_LEFT, "X 2-уровень");
+          it.print(20, 35, id(arial_12), TextAlign::TOP_LEFT, "влаги");
+          it.print(0, 50, id(arial_12), TextAlign::TOP_LEFT, "X 3-период");
+          it.print(0, 65, id(arial_12), TextAlign::TOP_LEFT, "X 4-время1");
+          it.print(0, 80, id(arial_12), TextAlign::TOP_LEFT, "X 5-время2");
+          it.print(0, 95, id(arial_12), TextAlign::TOP_LEFT, "X 6-яркость");
+      - id: period_page
+        lambda: |-
+          it.print(16, 10, id(arial_12), TextAlign::TOP_LEFT, "введите");
+          it.print(16, 30, id(arial_12), TextAlign::TOP_LEFT, "период");
+          it.print(16, 50, id(arial_12), TextAlign::TOP_LEFT, "ЧАСЫ");
+          it.printf(34, 75, id(arial_30), TextAlign::TOP_CENTER, "%.0f", id(period).state);
+          it.print(0, 110, id(arial_12), TextAlign::TOP_LEFT, "X 2-выйти");
+      - id: moisture_page
+        lambda: |-
+          it.print(16, 0, id(arial_12), TextAlign::TOP_LEFT, "введите");
+          it.print(16, 20, id(arial_12), TextAlign::TOP_LEFT, "уровень");
+          it.print(16, 40, id(arial_12), TextAlign::TOP_LEFT, "влаги");
+          it.print(16, 60, id(arial_12), TextAlign::TOP_LEFT, "сигнала");
+          it.printf(34, 80, id(arial_30), TextAlign::TOP_CENTER, "%.0f", id(alert_moisture).state);
+          it.print(0, 110, id(arial_12), TextAlign::TOP_LEFT, "X 2-выйти");
+      - id: time1_page
+        lambda: |-
+          it.print(16, 0, id(arial_12), TextAlign::TOP_LEFT, "введите");
+          it.print(16, 20, id(arial_12), TextAlign::TOP_LEFT, "время 1");
+          it.printf(34, 50, id(arial_30), TextAlign::TOP_CENTER, "%02d", id(time1).hour);
+          it.print(0, 110, id(arial_12), TextAlign::TOP_LEFT, "X 2-выйти");
+      - id: time2_page
+        lambda: |-
+          it.print(16, 0, id(arial_12), TextAlign::TOP_LEFT, "введите");
+          it.print(16, 20, id(arial_12), TextAlign::TOP_LEFT, "время 2");
+          it.printf(34, 50, id(arial_30), TextAlign::TOP_CENTER, "%02d", id(time2).hour);
+          it.print(0, 110, id(arial_12), TextAlign::TOP_LEFT, "X 2-выйти");
+      - id: brightness_page
+        lambda: |-
+          it.print(16, 0, id(arial_12), TextAlign::TOP_LEFT, "введите");
+          it.print(16, 20, id(arial_12), TextAlign::TOP_LEFT, "яркость");
+          it.printf(34, 50, id(arial_30), TextAlign::TOP_CENTER, "%.0f", id(brightness).state);
+          it.print(50, 80, id(arial_18), TextAlign::TOP_RIGHT, "%");
+          it.print(0, 110, id(arial_12), TextAlign::TOP_LEFT, "X 2-выйти");
+      - id: sleeping
+        lambda: |-
+          it.print(16, 0, id(arial_18), TextAlign::TOP_LEFT, "ДО");
+          it.print(16, 20, id(arial_12), TextAlign::TOP_LEFT, "встречи!");
+          it.print(16, 50, id(arial_12), TextAlign::TOP_LEFT, "Сон на");
+          it.printf(16, 65, id(arial_12), TextAlign::TOP_LEFT, id(next_sleep_duration_sensor).state.c_str());
+sensor:
+  - platform: adc
+    pin: ${batt_voltage_pin}
+    name: "Voltage 18650"
+    id: battery_voltage
+    update_interval: 30s
+    attenuation: 12db
+    filters:
+      - multiply: 1.5
+    unit_of_measurement: "V"
+    entity_category: "diagnostic"
+    on_value:
+      then:
+        - if: # Если напряжение ниже допустимого, -тогда сигналим раз в минуту
+            condition:
+                - lambda: 'return (id(battery_voltage).state < 3.35 );'
+            then:
+              - rtttl.play: 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'
+              - delay: 30s
+  - platform: debug
+    free:
+      name: "Heap Free"
+    block:
+      name: "Heap Max Block"
+    loop_time:
+      name: "Loop Time"
+  - platform: adc
+    pin: ${moisture_sensor_pin}
+    name: "Soil Moisture Sensor"
+    id: soil_moisture_sensor
+    update_interval: 1s
+    attenuation: 12db
+
+  - platform: copy # Reports the soil_moisture_sensor
+    source_id: soil_moisture_sensor
+    name: "Soil Moisture"
+    id: soil_moisture
+    accuracy_decimals: 0
+    filters:
+    #  - lambda: return min(max((x + 90.0) * (100.0 / 60.0), 0.0), 100.0);
+    #  - lambda: return std::clamp(remap(x, -90, -30, 0, 100), 0, 100);
+      - median:
+          window_size: 7
+          send_every: 4
+          send_first_at: 1
+      - calibrate_linear:
+         method: exact
+         datapoints:
+          # Map (from sensor db) to (sensor %)
+          - 1.05 -> 100.00
+          - 2.82 -> 0.00
+      - clamp:
+          min_value: 0
+          max_value: 100
+          #ignore_out_of_range: true
+      - round: 0
+    unit_of_measurement: "%"
+    entity_category: "diagnostic"
+    device_class: MOISTURE
+    on_value:
+      then:
+        - if: # Если влажности ниже установленной, и разрешен сигнал -тогда сигналим
+            condition:
+              and:
+                - lambda: 'return (id(soil_moisture).state < id(alert_moisture).state );'
+                - switch.is_on: alert_switch
+            then:
+              - rtttl.play: 'Urgent:d=8,o=6,b=500:c,e,d7,c,e,a#,c,e,a,c,e,g,c,e,a,c,e,a#,c,e,d7'
+number:
+  - platform: template
+    name: "Brightness" # Установка яркости
+    id: brightness
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 20
+    initial_value: 80
+    unit_of_measurement: "%"
+    restore_value: true
+    mode: box
+    on_value:
+      then:
+        lambda: |-
+          id(my_display).set_contrast(x / 100.0);
+  - platform: template
+    name: "Period (hours)"
+    id: period
+    icon: mdi:timer-alert-outline
+    optimistic: true
+    min_value: 1.0
+    max_value: 48.0 # Максимум 2 суток
+    step: 1.0
+    mode: box
+    initial_value: 6.0 # Начальное значение
+    restore_value: true
+  - platform: template
+    name: "Alert Moisture"
+    id: alert_moisture
+    icon: mdi:alert
+    optimistic: true
+    min_value: 1
+    max_value: 99 
+    step: 1
+    mode: box
+    unit_of_measurement: "%"
+    initial_value: 50 # Начальное значение
+    restore_value: true
+switch:
+  - platform: gpio
+    name: Supply
+    icon: mdi:tablet-dashboard
+    id: supply_switch
+    pin:
+      number: GPIO6
+      inverted: false
+      mode:
+        output: true
+        pullup: true
+    restore_mode: ALWAYS_ON
+  - platform: template # Виртуальный выключатель сон по периоду/установленному времени
+    name: 'Period⁄Time'
+    icon: mdi:timer
+    optimistic: true
+    id: period_time
+    restore_mode: RESTORE_DEFAULT_OFF
+  - platform: template # Виртуальный выключатель работа/возможность сна
+    name: 'Sleep⁄Work'
+    icon: mdi:sleep-off
+    optimistic: true
+    id: sleep_work
+    restore_mode: RESTORE_DEFAULT_ON
+  - platform: template # Виртуальный выключатель сигнала
+    name: 'Alert No⁄Yes'
+    icon: mdi:alert
+    optimistic: true
+    id: alert_switch
+    restore_mode: RESTORE_DEFAULT_ON
+deep_sleep:
+  id: my_deep_sleep
+  wakeup_pin_mode: INVERT_WAKEUP
+  wakeup_pin:
+    number: GPIO0
+    allow_other_uses: true # Кнопка также пробуждает
+    mode: INPUT_PULLUP
+    inverted: false
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/Moscow
+    servers:
+      - 0.ru.pool.ntp.org
+      - ntp0.ntp-servers.net
+      - 2.pool.ntp.org
+    update_interval: 1min
+    on_time_sync: 
+      - lambda: |-
+          id(time_received) = true;  // Устанавливаем флаг, когда время от SNTP получено
+          ESP_LOGI("custom", "Time received from SNTP, flag set to TRUE");
+datetime:
+  - platform: template # Проверка утром
+    id: time1
+    type: time
+    web_server:
+      sorting_group_id: sorting_group_time_sun
+    name: "Time1"
+    icon: mdi:sort-clock-descending-outline
+    optimistic: true
+    initial_value: "08:00:00"
+    restore_value: true
+  - platform: template # Проверка вечером
+    id: time2
+    type: time
+    web_server:
+      sorting_group_id: sorting_group_time_sun
+    name: Time2
+    icon: mdi:sort-clock-ascending-outline
+    optimistic: true
+    initial_value: "20:00:00"
+    restore_value: true
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO0 # кнопка к gpio0 и GND
+      allow_other_uses: true
+      mode: INPUT_PULLUP
+      inverted: true
+    name: Control Button
+    id: control_button
+    icon: mdi:gesture-tap-button
+    filters:
+      - delayed_on: 10ms # Защита от дребезга
+    on_press:
+      - lambda: |-
+          if (!id(is_touching)) {
+            id(is_touching) = true;
+            id(touch_start_time) = millis();
+            id(long_press_active) = false;
+            }
+    on_release:
+      - lambda: |-
+          id(is_touching) = false;
+          id(long_press_active) = false;
+    on_multi_click:
+    - timing: # Одиночное длительное нажатие для входа и выхода из настроек
+        - ON for 1500ms to 3s
+        - OFF for at least 0.5s
+      then:
+        - if:
+            condition:
+              display.is_displaying_page: main_page
+            then:
+              - display.page.show: setting
+            else:
+              - display.page.show: main_page
+ #       - deep_sleep.enter:
+ #           id: my_deep_sleep
+ #           sleep_duration: !lambda 'return id(next_sleep_duration);'
+    - timing: # Короткое нажатие для настроек
+        - ON for at most 1s
+        - OFF for at least 0.5s
+      then:
+        - if:
+            condition:
+              display.is_displaying_page: period_page
+            then:
+              - lambda: |-
+                  // Первичное изменение (если не long press)
+                  if (!id(long_press_active)) {
+                    float val = id(period)->state;
+                    val += 1.0;  // шаг изменения: +1 час
+                    if (val < 1) val = 1;
+                    if (val > 48) val = 1;
+                    auto call = id(period)->make_call();
+                    call.set_value(val);
+                    call.perform();
+                  }
+            else:
+              - if:
+                  condition:
+                    display.is_displaying_page: moisture_page
+                  then:
+                    - lambda: |-
+                        // Первичное изменение (если не long press)
+                        if (!id(long_press_active)) {
+                          float val = id(alert_moisture)->state;
+                          val += 1.0;  // шаг изменения: +1%
+                          if (val < 1) val = 1;
+                          if (val > 99) val = 1;
+                          auto call = id(alert_moisture)->make_call();
+                          call.set_value(val);
+                          call.perform();
+                        }
+                  else:
+                    - if:
+                        condition:
+                          display.is_displaying_page: brightness_page
+                        then:
+                          - lambda: |-
+                              // Первичное изменение (если не long press)
+                              if (!id(long_press_active)) {
+                              float val = id(brightness)->state;
+                                val += 20.0;  // шаг изменения: +20%
+                                if (val < 20) val = 20;
+                                if (val > 100) val = 20;
+                                auto call = id(brightness)->make_call();
+                                call.set_value(val);
+                                call.perform();
+                              }
+                        else:
+                          - if:
+                              condition:
+                                display.is_displaying_page: time1_page
+                              then: # Установка значения datetime time1
+                                - lambda: |-
+                                    int current_hour = id(time1_hour_var);
+                                    int new_hour = current_hour + 1;
+                                    // Зацикливание через модульную арифметику: 0–23 часа
+                                    new_hour = (new_hour + 24) % 24;
+                                    id(time1_hour_var) = new_hour;
+                                    auto call = id(time1)->make_call();
+                                    call.set_time({
+                                      .second = 0,
+                                      .minute = 0,
+                                      .hour = static_cast<uint8_t>(new_hour)
+                                    });
+                                    call.perform();
+                              else:
+                                - if:
+                                    condition:
+                                      display.is_displaying_page: time2_page
+                                    then: # Установка значения datetime time1
+                                      - lambda: |-
+                                          int current_hour = id(time2_hour_var);
+                                          int new_hour = current_hour + 1;
+                                          // Зацикливание через модульную арифметику: 0–23 часа
+                                          new_hour = (new_hour + 24) % 24;
+                                          id(time2_hour_var) = new_hour;
+                                          auto call = id(time2)->make_call();
+                                          call.set_time({
+                                            .second = 0,
+                                            .minute = 0,
+                                            .hour = static_cast<uint8_t>(new_hour)
+                                          });
+                                          call.perform();
+    - timing: # Двойное нажатие спать\не спать
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at least 0.2s
+      then:
+        - if:
+            condition:
+              display.is_displaying_page: main_page
+            then:
+              - switch.toggle: sleep_work
+            else:            
+              #- display.page.show: moisture_page
+              - if:
+                  condition:
+                    or:
+                      - display.is_displaying_page: period_page
+                      - display.is_displaying_page: moisture_page
+                      - display.is_displaying_page: time1_page
+                      - display.is_displaying_page: time2_page
+                      - display.is_displaying_page: brightness_page
+                  then:
+                    - display.page.show: main_page
+                  else:            
+                    - display.page.show: moisture_page
+    - timing: # Тройное нажатие для смены режима работы
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at least 0.2s
+      then:
+        - if:
+            condition:
+              display.is_displaying_page: main_page
+            then:
+              - switch.toggle: period_time
+            else:            
+              - display.page.show: period_page
+    - timing: # Четверное нажатие для смены сигнала
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at least 0.2s
+      then:
+        - if:
+            condition:
+              display.is_displaying_page: main_page
+            then:
+              - switch.toggle: alert_switch
+            else:            
+              - display.page.show: time1_page
+    - timing: # 5x нажатие для настройки времени 1
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at least 0.2s
+      then:
+        - display.page.show: time2_page
+    - timing: # 6x нажатие для настройки времени 2
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at most 1s
+        - ON for at most 1s
+        - OFF for at least 0.2s
+      then:
+        - display.page.show: brightness_page
+
+interval:
+  - interval: 7s # Запускать этот блок каждые 7 секунд
+    then:
+      - delay: 1s
+      - lambda: |-
+
+          // Используем сохранённую причину из on_boot 
+          auto wakeup_cause = id(last_wakeup_reason);
+          bool is_timer_wakeup = (wakeup_cause == ESP_SLEEP_WAKEUP_TIMER);
+
+          // Логируем причину пробуждения (информационно, для отладки)
+          if (!is_timer_wakeup) {
+            ESP_LOGI("custom", "Wake-up NOT BY TIMER (cause: %d)", wakeup_cause);
+          } else {
+            ESP_LOGI("custom", "Wake-up BY TIMER");
+          }
+          // Объявляем переменную для хранения длительности сна в миллисекундах
+          // Используем uint64_t, чтобы вместить большие значения (например, до 24 часов и больше)
+          uint64_t sleep_duration_ms = 0;
+
+          auto period_ms = id(period).state *3600 *1000; // переводим часы в мс
+
+          // Проверяем состояние выключателя period_time — если выключен, то работаем с периодом
+          if (!id(period_time).state) {
+            // Рассчитываем время сна в миллисекундах (секунды * 1000)
+            sleep_duration_ms = (uint64_t)period_ms;
+          }
+          // Если period_time включен — используем пользовательские установки времени datetime time1 и time2
+          else {
+
+
+            // Получаем текущее время из HA
+            auto current_time = id(sntp_time).now();
+            // Проверяем корректность
+            if (current_time.timestamp < 1609459200) {
+              ESP_LOGW("custom", "HA time invalid (timestamp: %ld), skipping custom time logic", current_time.timestamp);
+              return;
+            }
+            // Теперь используем поля ESPTime напрямую
+            int current_seconds = current_time.hour * 3600 + current_time.minute * 60 + current_time.second;
+            // Логи для отладки
+            ESP_LOGI("custom", "Current time: %04d-%02d-%02d %02d:%02d:%02d",
+              current_time.year, current_time.month, current_time.day_of_month,
+              current_time.hour, current_time.minute, current_time.second);
+            // Переводим текущее время в секунды с начала суток
+            //int current_seconds = now.hour * 3600 + now.minute * 60 + now.second;
+            // Аналогично переводим времена time1 и time2 в секунды
+            int time1_seconds = id(time1).hour * 3600 + id(time1).minute * 60 + id(time1).second;
+            int time2_seconds = id(time2).hour * 3600 + id(time2).minute * 60 + id(time2).second;
+            // Лямбда-функция для вычисления разницы во времени с учётом перехода через полночь
+            auto diff = [](int from, int to) -> int {
+              int d = to - from;
+              if (d <= 0) d += 24 * 3600; // Если время уже прошло сегодня — считаем до завтрашнего события
+              return d;
+            };
+
+            // Считаем сколько секунд осталось до time1 и до time2
+            int diff_1 = diff(current_seconds, time1_seconds);
+            int diff_2 = diff(current_seconds, time2_seconds);
+            // Выбираем ближайшее событие (меньшее значение)
+            int min_diff = diff_1 < diff_2 ? diff_1 : diff_2;
+
+            // Записываем в глобалку первое событие
+            if (diff_1 < diff_2) {
+              id(first_event) = 1;
+            } else {
+              id(first_event) = 2;
+            }
+
+            // Рассчитываем время сна в миллисекундах
+            sleep_duration_ms = (uint64_t)min_diff * 1000ULL;
+          }
+          // Сохраняем рассчитанную длительность сна в глобальную переменную
+          id(next_sleep_duration) = sleep_duration_ms;
+          // Проверка: если больше 24 часов (24 * 3600 * 1000 ms = 86400000 ms), публикуем "NaN"
+          if (sleep_duration_ms > 86400000) {
+            id(next_sleep_duration_sensor).publish_state("NaN");
+            ESP_LOGI("custom", "Skipped publishing due to invalid time: %d ms", sleep_duration_ms);
+            return;  // Выходим, не публикуем дальше
+          }
+          // id(next_sleep_duration_sensor).publish_state(to_string(sleep_duration_ms / 1000.0f) + " seconds"); // Публикуем состояние сенсора с длительностью сна в секундах (для визуализации в HA)
+          // Публикуем состояние сенсора с длительностью сна в формате "чч:мм:сс"
+          int total_seconds = static_cast<int>(sleep_duration_ms / 1000.0f);
+          int hours = total_seconds / 3600;
+          int minutes = (total_seconds % 3600) / 60;
+          // int seconds = total_seconds % 60;
+
+          char buffer[20];
+          snprintf(buffer, sizeof(buffer), "%dч %dм", hours, minutes);
+          // snprintf(buffer, sizeof(buffer), "%dh %dm %ds", hours, minutes, seconds);
+          id(next_sleep_duration_sensor).publish_state(std::string(buffer));
+
+  - interval: 2s
+    then:
+      - if:
+          condition:
+            - lambda: 'return !id(sleep_work).state;'
+          then:
+            - lambda: |-
+                if (id(countdown) == 0) {
+                  id(countdown) = 10;
+                } else if (id(countdown) > 0) {
+                  id(countdown)--;
+                }
+            - if:
+                condition:
+                  lambda: 'return id(countdown) == 0 && id(sntp_time).now().is_valid() && id(sntp_time).now().timestamp > 1735689600 && id(sntp_time).now().timestamp < 1893456000 && !id(sleep_work).state;'
+                then:
+                  - display.page.show: sleeping
+                  - logger.log: "Переход в глубокий сон"
+                  - delay: 2s
+                  - deep_sleep.enter:
+                      id: my_deep_sleep
+                      sleep_duration: !lambda 'return id(next_sleep_duration);'
+            - if:
+                condition:
+                  lambda: 'return id(countdown) == 0 && !id(time_received);'
+                then:
+                  - display.page.show: sleeping
+                  - logger.log: "Переход в глубокий сон на период"
+                  - lambda: |-
+                     // Объявляем переменную для хранения длительности сна в миллисекундах
+                     // Используем uint64_t, чтобы вместить большие значения (например, до 24 часов и больше)
+                     uint64_t period_sleep_duration_ms = 0;
+                     auto period_ms = id(period).state *3600 *1000; // переводим часы в мс
+
+                     // Рассчитываем время сна в миллисекундах (секунды * 1000)
+                     period_sleep_duration_ms = (uint64_t)period_ms;
+                     // Сохраняем рассчитанную длительность сна в глобальную переменную
+                     id(next_sleep_duration) = period_sleep_duration_ms;
+                     // Публикуем состояние сенсора с длительностью сна в формате "чч:мм:сс"
+                     int total_seconds = static_cast<int>(period_sleep_duration_ms / 1000.0f);
+                     int hours = total_seconds / 3600;
+                     int minutes = (total_seconds % 3600) / 60;
+                     // int seconds = total_seconds % 60;
+
+                     char buffer[20];
+                     snprintf(buffer, sizeof(buffer), "%dч %dм", hours, minutes);
+                     // snprintf(buffer, sizeof(buffer), "%dh %dm %ds", hours, minutes, seconds);
+                     id(next_sleep_duration_sensor).publish_state(std::string(buffer));
+                  - delay: 3s
+                  - deep_sleep.enter:
+                      id: my_deep_sleep
+                      sleep_duration: !lambda 'return id(next_sleep_duration);'
+# Interval для запуска long press (после 1s)
+  - interval: 200ms
+    then:
+      - lambda: |-
+          if (id(is_touching) && !id(long_press_active) && (millis() - id(touch_start_time) > 1000)) {
+            id(long_press_active) = true;
+          }
+  # Interval для повторения действия (каждые 500ms, пока кнопка нажата и на нужной странице)
+  - interval: 300ms
+    then:
+      - lambda: |-
+          auto active_page = id(my_display).get_active_page();
+          if (id(long_press_active) && id(is_touching) && (active_page == id(period_page))) {
+            float val = id(period)->state;
+            val += 1.0;  // шаг изменения: +1 час
+            if (val < 1) val = 1;
+            if (val > 48) val = 48;
+            auto call = id(period)->make_call();
+            call.set_value(val);
+            call.perform();
+          }
+          if (id(long_press_active) && id(is_touching) && (active_page == id(moisture_page))) {
+            float val = id(alert_moisture)->state;
+            val += 1.0;  // шаг изменения: +1 %
+            if (val < 1) val = 1;
+            if (val > 99) val = 99;
+            auto call = id(alert_moisture)->make_call();
+            call.set_value(val);
+            call.perform();
+          }
+button:
+  - platform: template # Немедленный сон
+    id: sleep_start
+    name: "Sleep Start"
+    icon: mdi:sleep
+    on_press: 
+      then:
+        - display.page.show: sleeping
+        - logger.log: "Переход в глубокий сон"
+        - delay: 2s
+        - deep_sleep.enter:
+            id: my_deep_sleep
+            sleep_duration: !lambda 'return id(next_sleep_duration);'
+debug:
+  update_interval: 5s
+text_sensor:
+  - platform: debug
+    device:
+      name: "Device Info"
+    reset_reason:
+      name: "Reset Reason"
+  - platform: template
+    name: "Boot History"
+    id: boot_history_sensor
+    icon: mdi:notebook-check-outline
+    lambda: |-
+      return id(bootHistory);
+  - platform: template
+    name: "Next Sleep Duration"
+    id: next_sleep_duration_sensor
+    icon: mdi:bed-clock
+  - platform: template
+    name: "Current SNTP Time"
+    icon: mdi:home-clock
+    id: current_sntp_time
+    lambda: |-
+      char str[17]; time_t currTime = id(sntp_time).now().timestamp;
+      strftime(str, sizeof(str), "%Y-%m-%d %H:%M", localtime(&currTime));
+      return  { str };
+    update_interval: 60s
+  - platform: template
+    id: wakeup_cause_text
+    icon: mdi:chat-sleep-outline
+    name: "Wakeup Cause"
+    update_interval: never
+    lambda: |-
+      switch (id(last_wakeup_reason)) {
+        case 0: return {"0-Norm"};
+        case 2: return {"2-EXT0"};
+        case 3: return {"3-EXT1"};
+        case 4: return {"4-Timer"};
+        case 5: return {"5-Touchpad"};
+        case 6: return {"6-ULP"};
+        case 7: return {"7-GPIO"};
+        case 8: return {"8-UART"};
+        case 9: return {"9-WIFI"};
+        case 10: return {"10-COCPU"};
+        case 11: return {"11-COCPU_TRAP"};
+        case 12: return {"12-BT"};
+        default: return {"Unknown"};
+      }
+rtttl:
+  output: rtttl_out                              # Зуммер
+#  id: my_rtttl
+#  gain: 0.95
+output:
+  - platform: ledc                                 # Зуммер
+    pin: ${rtttl_pin}
+    inverted: false
+    id: rtttl_out
