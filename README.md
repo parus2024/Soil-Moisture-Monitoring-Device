@@ -92,7 +92,7 @@
 - [внешний вид](images/soil_moisture_1.jpeg)
 - [внешний вид](images/soil_moisture_2.jpeg)
 - [Схема соединений](images/soil-moisture-shema-v1.jpeg)
-- [Видео#1 YOUTUBE]()
+- [Видео#1 YOUTUBE](https://youtu.be/_u6fvSj4mms)
 - [Файлы для печати]()
 
 ## 📄 Лицензия
